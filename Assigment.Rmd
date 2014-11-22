@@ -1,0 +1,144 @@
+---
+title: "Practical Machine Learning"
+author: "Yvonne Arnoldus"
+date: "Friday, November 21, 2014"
+output: html_document
+---
+
+## Synopsis
+
+This detailed analysis has been performed to fulfill the requirements of the course project for the course Practical Machine Learning offered by the Johns Hopkins University on Coursera.
+
+## Assigment
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. 
+
+
+## Environment setup
+
+I'm using R-studio with R 3.1.2 on a 64 bit Windows 7 machine with Intel i7 3.4 Ghz processor and 16 GB of RAM.
+
+```{r warning=FALSE}
+Sys.setlocale("LC_TIME", "English")
+setwd("D:/Coursera/Practical Machine Learning")
+require(caret)
+require(randomForest)
+require(pander)
+require(downloader)
+set.seed(125)
+```
+
+## Data retrieval
+
+#### Retrieving data
+
+The data is available through the internet so first download it.
+```{r warning=FALSE}
+trainURL<-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testURL <-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+if (!file.exists("pml-training.csv")){
+    download(trainURL, "pml-training.csv", mode = "wb")
+}
+if (!file.exists("pml-testing.csv")){
+    download(testURL, "pml-testing.csv", mode = "wb")
+}
+```
+
+#### Load Data
+
+```{r}
+training <- read.csv("pml-training.csv",na.strings=c("NA",""))
+testing <-read.csv("pml-testing.csv",na.strings=c("NA",""))
+```
+
+
+## Data Preprocessing
+
+First lets see what for data we got and if it contains any columns or rows not relevant for the analysis
+
+```{r}
+names(training)
+summary(training)
+sum(is.na(training))
+```
+
+The data contains a lot of non relevant columns and a lot of columns with a lot of NA values. We need to remove this from the training and the test set.
+
+```{r}
+# remove features containing NA.
+training <- training[, colSums(is.na(training)) == 0]
+testing <- testing[, colSums(is.na(testing)) == 0]
+
+# remove features not from the sensors
+training <- training[,grepl("X|user_name|timestamp|window|^max|^min|^ampl|^var|^avg|^stdd|^ske|^kurt", colnames(training))==F]
+testing <- testing[,grepl("X|user_name|timestamp|window|^max|^min|^ampl|^var|^avg|^stdd|^ske|^kurt", colnames(testing))==F]
+```
+
+## Exploratory Data Analysis
+
+Before starting the modeling I check to summary statistics and frequency plot for the classe variable to get a feel for the data.
+
+```{r}
+summaryTraining <- summary(training$classe)
+pandoc.table(summaryTraining, style = "grid", justify = 'left', caption = '`classe` frequencies')
+plot(training$classe,col=rainbow(5),main = "`classe` frequency plot")
+```
+
+## Modelling
+
+
+#### Fit model
+
+Before applying the model i'll split the training set in 2 parts a large part to train the model and a small part to use later to preform cross-validation to estimate the sample error.
+
+```{r}
+inTrain <- createDataPartition(training$classe, p=0.70, list=FALSE)
+trainingMinValidation <- training[inTrain,]
+validation <- training[-inTrain,]
+```
+
+I chose the Random Forest as machine learning algorithm for building my model because it is one of the most accurate in predecition contests. The drawbacks of this algorithm are the speed, the interpretability and overfitting. As the number of observation in this dataset is not very large, I can use it.
+
+```{r}
+if (!file.exists("model.RData")){
+    model<- train(classe~.,data=trainingMinValidation, method="rf")
+    save(model,file="model.RData")
+}
+load(file = "./model.RData")
+model
+model$finalModel
+```
+
+
+#### Sample error
+
+Using the model that i have trained, i'll be performing cross validation with validation data. I expect een sample error rate of less then 2% cause the model had and accuracy of a little over 98%
+
+```{r}
+if (!file.exists("model_crossvalidation.RData")){
+    traincontrol <- trainControl(method = "cv", number = 5)
+    model_crossvalidation <- train(classe~.,data=validation, method="rf",trControl=traincontrol)
+    save(model_crossvalidation,file="model_crossvalidation.RData")
+}
+load(file="./model_crossvalidation.RData")
+confusionMatrix(predict(model_crossvalidation, newdata=validation), validation$classe)
+model_crossvalidation$finalModel
+```
+
+The estimates error with crossvalidation is 2.01% over 2% but not by much.
+
+## Predict the 20 test cases
+
+```{r}
+test_prediction<-predict(model, newdata=testing)
+test_prediction
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+pml_write_files(test_prediction)
+```
